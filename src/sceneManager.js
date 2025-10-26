@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { MathUtils } from 'three';
 import { Vector3 } from 'three';
+import { ExtrudeGeometry, Shape } from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
 
@@ -76,20 +77,25 @@ export class SceneManager {
 		scene.add(ambientLight);
 
 		const grid = new THREE.GridHelper(200, 20, 0x888888, 0x444444);
+		grid.position.y = 112;
 		scene.add(grid);
 
 		const axes = new THREE.AxesHelper(100);
+		axes.position.y = 112;
 		scene.add(axes);
 
         const waterGeometry = new THREE.PlaneGeometry(3000, 3000);
 		waterGeometry.rotateX(-Math.PI / 2);
 
-		const waterMaterial = new THREE.MeshStandardMaterial({
+		const waterMaterial = new THREE.MeshPhongMaterial({
 			color: 0x1e90ff,
 		});
 
 		const water = new THREE.Mesh(waterGeometry, waterMaterial);
 		scene.add(water);
+
+		const islandGroup = new THREE.Group();
+		scene.add(islandGroup);
 
 		const textureLoader = new THREE.TextureLoader();
 
@@ -109,7 +115,7 @@ export class SceneManager {
 				const islandGeometry = new THREE.PlaneGeometry(islandSize, islandSize, segments, segments);
 				islandGeometry.rotateX(-Math.PI / 2);
 
-				const islandMaterial = new THREE.MeshStandardMaterial({
+				const islandMaterial = new THREE.MeshPhongMaterial({
 				displacementMap: heightMap,
 				displacementScale: 112,
 				displacementBias: 0,
@@ -121,7 +127,7 @@ export class SceneManager {
 
 				const island = new THREE.Mesh(islandGeometry, islandMaterial);
 				island.position.y = -5;
-				scene.add(island);
+				islandGroup.add(island);
 			},
 
 			undefined,
@@ -131,6 +137,99 @@ export class SceneManager {
 				console.warn('Asegúrate de que el archivo esté en: public/iwojima.png');
 			}
 		);
+
+		const geometry = new THREE.BufferGeometry();
+		const vertices = [];
+		const indices = [];
+		const uvs = [];
+
+		// === 4 ANILLOS CLAVE (solo donde cambia la forma) ===
+		const levels = [
+		{ y: 0,      w: 10, d: 10, uv: 0.0 },   // Base
+		{ y: 50,     w: 10, d: 10, uv: 0.3 },   // Final de fuste
+		{ y: 60,     w: 30, d: 30, uv: 0.6 },   // Inicio sala de control
+		{ y: 65,     w: 0,  d: 0,  uv: 1.0 }    // Punta (colapsada)
+		];
+
+		levels.forEach(level => {
+		const hw = level.w / 2;
+		const hd = level.d / 2;
+		// 4 vértices por anillo (orden horario)
+		vertices.push(-hw, level.y, -hd);
+		vertices.push( hw, level.y, -hd);
+		vertices.push( hw, level.y,  hd);
+		vertices.push(-hw, level.y,  hd);
+
+		// UVs: repite horizontal, escala vertical
+		uvs.push(0, level.uv);
+		uvs.push(1, level.uv);
+		uvs.push(1, level.uv);
+		uvs.push(0, level.uv);
+		});
+
+		// === CONECTAR ANILLOS CON QUADS (solo 4 segmentos) ===
+		for (let i = 0; i < levels.length - 1; i++) {
+			const a = i * 4;
+			const b = a + 1;
+			const c = a + 2;
+			const d = a + 3;
+			const e = a + 4;
+			const f = b + 4;
+			const g = c + 4;
+			const h = d + 4;
+
+			// Caras en sentido horario (CW) → normales externas
+			indices.push(a, f, b); indices.push(a, e, f);
+			indices.push(b, g, c); indices.push(b, f, g);
+			indices.push(c, h, d); indices.push(c, g, h);
+			indices.push(d, e, a); indices.push(d, h, e);
+		}
+
+		geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+		geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+		geometry.setIndex(indices);
+
+		geometry.computeVertexNormals();
+
+		const material = new THREE.MeshPhongMaterial({
+			color: 0xaaaaaa,
+			flatShading: true,
+			metalness: 0.5,
+			roughness: 0.5
+		});
+
+		const torre = new THREE.Mesh(geometry, material);
+
+		const barrack = new THREE.CylinderGeometry(7.5, 7.5, 30, 32);
+		barrack.rotateX(Math.PI / 2);
+		barrack.rotateY(Math.PI / 2);
+		const barrackMaterial = new THREE.MeshPhongMaterial({ color: 0x8b4513 });
+
+		const pistas = new THREE.Group();
+		const edificios = new THREE.Group();
+		const block = new THREE.BoxGeometry(10, 10, 10);
+		const blockMaterial = new THREE.MeshPhongMaterial({ color: 0x7d7d7d });
+		const pista1 = new THREE.Mesh(block, blockMaterial);
+		const pista2 = new THREE.Mesh(block, blockMaterial);
+
+		edificios.add(pista2);
+		edificios.add(torre);
+		for(let i=0; i<7; i++){
+			const barrackN = new THREE.Mesh(barrack, barrackMaterial);
+			barrackN.position.set(0,5,62.5 - i*17.5);
+			edificios.add(barrackN);
+		}
+		//barrack1.position.set(0,5,60);
+		torre.position.set(10,0,-60);
+		pista1.scale.set(5,1,25);
+		pista1.position.set(-25,0,0);
+		pista2.scale.set(5,1,15);
+		edificios.position.set(25,0,-50);
+		pistas.add(pista1);
+		pistas.add(edificios);
+		pistas.rotateY(MathUtils.degToRad(-50));
+		pistas.position.set(100,105,-150);
+		islandGroup.add(pistas);
 	}
 
 	animate() {
