@@ -4,58 +4,64 @@ import { MathUtils } from 'three';
 import { Vector3 } from 'three';
 import { ExtrudeGeometry, Shape } from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 
-
-// Crea un cilindro dividido en paredes y tapas.
-// radio: número (requerido)
-// altura: número (requerido)
-// radialSegments: número (opcional, default 64)
-
-function makeSplitCylinder(radius, height, radialSegments = 64) {
-	const walls = new THREE.CylinderGeometry(
-		radius, // radiusTop
-		radius, // radiusBottom
-		height, // height
-		radialSegments, // radialSegments
-		1, // heightSegments
-		true // openEnded
-	);
-
-	// --- TAPAS ---
-	const top = new THREE.CircleGeometry(radius, radialSegments);
-	top.rotateX(-Math.PI / 2);
-	top.translate(0, height / 2, 0);
-
-	const bottom = new THREE.CircleGeometry(radius, radialSegments);
-	bottom.rotateX(Math.PI / 2);
-	bottom.translate(0, -height / 2, 0);
-
-	function scaleV(geometry, factor = 10) {
-		const uv = geometry.attributes.uv;
-		if (uv) {
-			for (let i = 0; i < uv.count; i++) {
-				uv.setY(i, uv.getY(i) * factor);
-			}
-			uv.needsUpdate = true;
-		}
-	}
-
-	scaleV(walls);
-	scaleV(top);
-	scaleV(bottom);
-
-	return {
-		walls,
-		caps: {
-			top,
-			bottom,
-		},
-	};
-}
 
 
 export class SceneManager {
-	constructor(scene) {
+	handleKeyPress = (event) => {
+		const torreta = this.scene.getObjectByName('torreta');
+		const canon = this.scene.getObjectByName('canon');
+		switch(event.key) {
+			case 'j':
+				if (torreta) {
+					torreta.rotation.y += MathUtils.degToRad(5);
+				}
+				break;
+			case 'l':
+				if (torreta) {
+					torreta.rotation.y -= MathUtils.degToRad(5);
+				}
+				break;
+			case 'i':
+				if (canon) {
+					canon.rotation.z += MathUtils.degToRad(5);
+					canon.rotation.z = Math.min(canon.rotation.z, MathUtils.degToRad(0));
+				}
+				break;
+			case 'k':
+				if (canon) {
+					canon.rotation.z -= MathUtils.degToRad(5);
+					canon.rotation.z = Math.max(canon.rotation.z, MathUtils.degToRad(-90));
+				}
+				break;
+			default:
+				break;
+		}
+	}
+
+	onModelLoaded = (glb) => {
+		console.log('Modelo 3D cargado: ', glb);
+		glb.scene.scale.set(2,2,2);
+		const model = new THREE.Group();
+		model.add(glb.scene);
+		model.name = 'Destructor';
+		this.scene.add(model);
+		document.addEventListener('keydown', this.handleKeyPress);
+	}
+
+	onProgress = (event) =>{
+		console.log((event.loaded / event.total * 100) + '% cargado');
+	}
+
+	onLoadError = (error) => {
+		console.error('Error al cargar: ', error);
+	}
+
+	constructor(scene, camera) {
+		this.scene = scene;
+		this.camera = camera;
+
         const sky = new Sky();
 
         sky.scale.setScalar( 450000 );
@@ -73,7 +79,7 @@ export class SceneManager {
 		light.position.copy(sunPosition);
 		scene.add(light);
 
-		const ambientLight = new THREE.AmbientLight(0xffffff,0.5);
+		const ambientLight = new THREE.AmbientLight(0xffffff,0.25);
 		scene.add(ambientLight);
 
 		const grid = new THREE.GridHelper(200, 20, 0x888888, 0x444444);
@@ -120,8 +126,6 @@ export class SceneManager {
 				displacementScale: 112,
 				displacementBias: 0,
 				color: 0x3a5f3a,
-				metalness: 0.1,
-				roughness: 0.9,
 				side: THREE.DoubleSide
 				});
 
@@ -194,8 +198,6 @@ export class SceneManager {
 		const material = new THREE.MeshPhongMaterial({
 			color: 0xaaaaaa,
 			flatShading: true,
-			metalness: 0.5,
-			roughness: 0.5
 		});
 
 		const torre = new THREE.Mesh(geometry, material);
@@ -204,6 +206,9 @@ export class SceneManager {
 		barrack.rotateX(Math.PI / 2);
 		barrack.rotateY(Math.PI / 2);
 		const barrackMaterial = new THREE.MeshPhongMaterial({ color: 0x8b4513 });
+
+		const loader = new GLTFLoader();
+		loader.load('/destructor.glb', this.onModelLoaded, this.onProgress, this.onLoadError);
 
 		const pistas = new THREE.Group();
 		const edificios = new THREE.Group();
@@ -219,7 +224,6 @@ export class SceneManager {
 			barrackN.position.set(0,5,62.5 - i*17.5);
 			edificios.add(barrackN);
 		}
-		//barrack1.position.set(0,5,60);
 		torre.position.set(10,0,-60);
 		pista1.scale.set(5,1,25);
 		pista1.position.set(-25,0,0);
@@ -233,5 +237,20 @@ export class SceneManager {
 	}
 
 	animate() {
+		const destructor = this.scene.getObjectByName("Destructor");
+		const barquito = this.scene.getObjectByName("destructor");
+    
+    	if (barquito) {
+			destructor.rotation.y += 0.003;
+			const shipWorldPos = new THREE.Vector3();
+			barquito.getWorldPosition(shipWorldPos);
+
+			const localOffset = new THREE.Vector3(0, 40, -120);
+			const worldOffset = localOffset.clone().applyQuaternion(destructor.quaternion);
+			const cameraPos = shipWorldPos.clone().add(worldOffset);
+
+			this.camera.position.lerp(cameraPos, 0.1);
+			this.camera.lookAt(shipWorldPos);
+		}
 	}
 }

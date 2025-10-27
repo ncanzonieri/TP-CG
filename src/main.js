@@ -36,5 +36,5 @@ function animate() {
 }
 
 setupThreeJs();
-sceneManager = new SceneManager(scene);
+sceneManager = new SceneManager(scene,camera);
 animate();
