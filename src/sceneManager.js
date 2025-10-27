@@ -40,6 +40,14 @@ export class SceneManager {
 		}
 	}
 
+	handleCameraSwitch = (event) => {
+        const key = event.key;
+        if (['1', '4', '5', '6', '7', '8'].includes(key)) {
+            this.mode = key;
+            console.log('Modo cámara cambiado a:', key);
+        }
+    };
+
 	onModelLoaded = (glb) => {
 		console.log('Modelo 3D cargado: ', glb);
 		glb.scene.scale.set(2,2,2);
@@ -58,9 +66,13 @@ export class SceneManager {
 		console.error('Error al cargar: ', error);
 	}
 
-	constructor(scene, camera) {
+	constructor(scene, camera,controls) {
 		this.scene = scene;
 		this.camera = camera;
+		this.controls = controls;
+		this.mode = 1;
+
+		document.addEventListener('keypress', this.handleCameraSwitch);
 
         const sky = new Sky();
 
@@ -90,7 +102,7 @@ export class SceneManager {
 		axes.position.y = 112;
 		scene.add(axes);
 
-        const waterGeometry = new THREE.PlaneGeometry(3000, 3000);
+        const waterGeometry = new THREE.PlaneGeometry(50000, 50000);
 		waterGeometry.rotateX(-Math.PI / 2);
 
 		const waterMaterial = new THREE.MeshPhongMaterial({
@@ -98,6 +110,7 @@ export class SceneManager {
 		});
 
 		const water = new THREE.Mesh(waterGeometry, waterMaterial);
+		water.position.y = 5;
 		scene.add(water);
 
 		const islandGroup = new THREE.Group();
@@ -130,7 +143,7 @@ export class SceneManager {
 				});
 
 				const island = new THREE.Mesh(islandGeometry, islandMaterial);
-				island.position.y = -5;
+				island.position.y = -10;
 				islandGroup.add(island);
 			},
 
@@ -201,6 +214,7 @@ export class SceneManager {
 		});
 
 		const torre = new THREE.Mesh(geometry, material);
+		torre.name = 'torre';
 
 		const barrack = new THREE.CylinderGeometry(7.5, 7.5, 30, 32);
 		barrack.rotateX(Math.PI / 2);
@@ -215,6 +229,7 @@ export class SceneManager {
 		const block = new THREE.BoxGeometry(10, 10, 10);
 		const blockMaterial = new THREE.MeshPhongMaterial({ color: 0x7d7d7d });
 		const pista1 = new THREE.Mesh(block, blockMaterial);
+		pista1.name = "pista";
 		const pista2 = new THREE.Mesh(block, blockMaterial);
 
 		edificios.add(pista2);
@@ -239,18 +254,89 @@ export class SceneManager {
 	animate() {
 		const destructor = this.scene.getObjectByName("Destructor");
 		const barquito = this.scene.getObjectByName("destructor");
+		const torreta = this.scene.getObjectByName("torreta");
+		const canon = this.scene.getObjectByName("canon");
     
-    	if (barquito) {
-			destructor.rotation.y += 0.003;
-			const shipWorldPos = new THREE.Vector3();
-			barquito.getWorldPosition(shipWorldPos);
+    	if (!barquito) return;
+		destructor.rotation.y += 0.003;
 
-			const localOffset = new THREE.Vector3(0, 40, -120);
-			const worldOffset = localOffset.clone().applyQuaternion(destructor.quaternion);
-			const cameraPos = shipWorldPos.clone().add(worldOffset);
+		const shipWorldPos = new THREE.Vector3();
+		barquito.getWorldPosition(shipWorldPos);
 
-			this.camera.position.lerp(cameraPos, 0.1);
-			this.camera.lookAt(shipWorldPos);
+		switch (this.mode) {
+			case '1':  // Orbital general centrada en la isla
+				this.controls.enable = true;
+				this.controls.target.set(0,0,0);  // Posición de pistas/isla
+				this.camera.position.copy(new THREE.Vector3(0, 1000, 0));
+				break;
+			case '4':  // Orbital centrada en el barco
+				this.controls.enable = true;
+				this.controls.target.copy(shipWorldPos);
+				this.camera.position.copy(shipWorldPos.clone().add(new THREE.Vector3(0, 500, 0)));
+				break;
+			case '5':  // De persecución del barco (detrás)
+				this.controls.enable = false;
+				const localOffset = new THREE.Vector3(0, 40, -120);
+				const worldOffset = localOffset.clone().applyQuaternion(destructor.quaternion);
+				const cameraPos = shipWorldPos.clone().add(worldOffset);
+				this.camera.position.lerp(cameraPos, 0.1);
+				this.camera.lookAt(shipWorldPos);
+				break;
+			case '6':  // Dirección que apunta el cañón (vista desde cañón)
+				this.controls.enable = false;
+				// 1. Definir el offset (desplazamiento) LOCAL para la posición de la cámara
+				// El cañón está rotado por la torreta (Y) y por sí mismo (Z).
+				// Necesitamos que la cámara se desplace un poco en el eje local:
+				// X: Lateral (para ver el cañón al lado)
+				// Y: Arriba/Abajo (para ver el cañón desde arriba o abajo)
+				// Z: Adelante/Atrás (para ver desde la boca o desde atrás)
+				
+				// Ejemplo de offset: 5 unidades a la DERECHA, 2 unidades ARRIBA, 10 unidades ATRÁS (del punto pivote del cañón)
+				const localCameraOffset = new THREE.Vector3(0, 10, 0); 
+				
+				// 2. Transformar el offset local a coordenadas mundiales (para la posición de la cámara)
+				// Usamos un clon del offset.
+				const worldCameraPos = localCameraOffset.clone();
+				canon.localToWorld(worldCameraPos); // Este es el punto mundial donde estará la cámara
+				
+				this.camera.position.copy(worldCameraPos);
+				
+				// ----------------------------------------------------
+				// 3. Calcular el punto de enfoque (mismo que antes, asumiendo (0, 1, 0) es la dirección correcta)
+				const lookAheadDistance = 500; 
+				const localDirection = new THREE.Vector3(0, 1, 0); // Eje de disparo corregido
+				
+				const localTarget = localDirection.multiplyScalar(lookAheadDistance);
+				
+				// La posición inicial del cañón es (0,0,0) en su espacio local.
+				// Transformamos el punto local (0, 500, 0) a coordenadas mundiales
+				const canonWorldTarget = localTarget.clone();
+				canon.localToWorld(canonWorldTarget);
+
+				// 4. Apuntar la cámara a ese punto
+				this.camera.lookAt(canonWorldTarget);
+				break;
+			case '7':  // Orbital centrada en torre de control
+				this.controls.enable = true;
+				const torre = this.scene.getObjectByName('torre');
+                const torrePos = new THREE.Vector3();
+                torre.getWorldPosition(torrePos);
+                this.controls.target.copy(torrePos);
+                this.camera.position.copy(torrePos.clone().add(new THREE.Vector3(0, 100, 200)));
+				break;
+			case '8':  // Orbital centrada en pista de aeródromo
+				this.controls.enable = true;
+				const pistaPos = new THREE.Vector3();
+				this.scene.getObjectByName('pista').getWorldPosition(pistaPos);
+				this.controls.target.copy(pistaPos);
+				this.camera.position.copy(pistaPos.clone().add(new THREE.Vector3(-70, 70, 70)));
+				break;
+			default:
+				break;
 		}
+		
+		if (this.controls.enable) {
+        	this.controls.update();
+    	}
 	}
 }

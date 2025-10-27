@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 import { SceneManager } from './sceneManager.js';
-let scene, camera, renderer, container, sceneManager, cameras;
+let scene, camera, renderer, container, sceneManager, controls;
 
 function setupThreeJs() {
 	container = document.getElementById('container3D');
@@ -13,10 +13,10 @@ function setupThreeJs() {
 	container.appendChild(renderer.domElement);
 
 	camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000000);
-	camera.position.set(0, 100, 50);
+	camera.position.set(0, 1000, 0);
 	camera.lookAt(0, 0, 0);
 
-	const controls = new OrbitControls(camera, renderer.domElement);
+	controls = new OrbitControls(camera, renderer.domElement);
 
 	window.addEventListener('resize', onResize);
 	onResize();
@@ -36,5 +36,5 @@ function animate() {
 }
 
 setupThreeJs();
-sceneManager = new SceneManager(scene,camera);
+sceneManager = new SceneManager(scene,camera,controls);
 animate();
