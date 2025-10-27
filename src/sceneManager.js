@@ -5,8 +5,7 @@ import { Vector3 } from 'three';
 import { ExtrudeGeometry, Shape } from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-
-
+import { AirplaneController, AIRPLANE_KEYS } from './airplaneController.js';
 
 export class SceneManager {
 	handleKeyPress = (event) => {
@@ -64,6 +63,196 @@ export class SceneManager {
 
 	onLoadError = (error) => {
 		console.error('Error al cargar: ', error);
+	}
+
+	createZeroFuselage() {
+        // ... (Secciones 1 y 2 - Perfil y Parámetros - sin cambios)
+        const radius = 1;
+        const profileShape = new THREE.Shape();
+        profileShape.absellipse(0, 0, radius, radius, 0, Math.PI * 2, false, 0); 
+        
+        const profilePoints = profileShape.extractPoints(10).shape; 
+        const profileCount = profilePoints.length;
+
+        const length = 10;
+        const segments = 50; 
+        
+        // El recorrido es una línea recta a lo largo del eje Z
+        // No necesitamos FrenetFrames para una línea recta simple.
+
+        const vertices = [];
+        const indices = [];
+
+        // --- 4. Iterar y Aplicar Escala Variable ---
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments; // Valor normalizado del recorrido (0.0 a 1.0)
+            
+            // ------------------------------------------------------------------
+            // CÁLCULO DE ESCALA (Sin cambios)
+            let scaleFactor;
+            if (t <= 0.05) {
+                scaleFactor = t / 0.05;
+            } else if (t <= 0.6) {
+				scaleFactor = 1.0;
+			} else {
+                const t_colapse = (t - 0.6) * 2; 
+                scaleFactor = 1.0 - t_colapse;
+            }
+            const scaleX = scaleFactor * 1.0; 
+            const scaleY = scaleFactor * 0.9; 
+            // ------------------------------------------------------------------
+            
+            // CÁLCULO MANUAL DE POSICIÓN Y MARCOS PARA LÍNEA RECTA
+            
+            // 1. Posición: Interpolación lineal a lo largo del eje Z
+            // Z va de -length/2 a +length/2
+            const z = THREE.MathUtils.lerp(-length / 2, length / 2, t);
+            const position = new THREE.Vector3(0, 0, z);
+
+            // 2. Marcos de orientación (para que el perfil esté perpendicular a la línea Z)
+            // Normal (Vertical): Eje Y local
+            const normal = new THREE.Vector3(0, 1, 0); 
+            // Binormal (Horizontal): Eje X local
+            const binormal = new THREE.Vector3(1, 0, 0); 
+            // La tangente es (0, 0, 1) y no se usa directamente en la fórmula P = Pos + ...
+            
+            // Transformar puntos 2D del perfil a 3D
+            for (let j = 0; j < profileCount; j++) {
+                const profilePoint = profilePoints[j];
+                
+                // Aplicar escala y mover al espacio 3D
+                const x = profilePoint.x * scaleX;
+                const y = profilePoint.y * scaleY;
+                
+                // La posición final es:
+                // Posición de la línea (position)
+                // + Desplazamiento vertical (normal * y)
+                // + Desplazamiento horizontal (binormal * x)
+                
+                const vertex = new THREE.Vector3().copy(position);
+                vertex.add(normal.clone().multiplyScalar(y));
+                vertex.add(binormal.clone().multiplyScalar(x));
+
+                vertices.push(vertex.x, vertex.y, vertex.z);
+            }
+            
+            // --- Conexión de Anillos (sin cambios) ---
+            if (i < segments) {
+                const a = i * profileCount;
+                const b = a + profileCount;
+                for (let j = 0; j < profileCount; j++) {
+                    const c = a + ((j + 1) % profileCount);
+                    const d = b + ((j + 1) % profileCount);
+
+                    indices.push(a + j, b + j, c);
+                    indices.push(b + j, d, c);
+                }
+            }
+        }
+        
+        // --- 5. Finalizar la Geometría (sin cambios) ---
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+        geometry.setIndex(indices);
+        geometry.computeVertexNormals();
+        
+        const material = new THREE.MeshPhongMaterial({ color: 0xaa9955, side: THREE.DoubleSide });
+        const fuselage = new THREE.Mesh(geometry, material);
+        fuselage.name = 'ZeroFuselage';
+        
+        // La rotación en X está correcta para alinear el fuselaje con la escena.
+        //fuselage.rotation.x = Math.PI / 2; 
+
+        return fuselage;
+    }
+
+	createWing() {
+		// === 1. Perfil 2D: medio óvalo simétrico (arriba y abajo) ===
+		const maxChord = 10;
+		const maxThickness = 0.25;
+
+		const profileShape = new THREE.Shape();
+		profileShape.moveTo(0, 0);
+		profileShape.bezierCurveTo(
+			maxChord * 0.3, maxThickness,
+			maxChord * 0.7, maxThickness,
+			maxChord, 0
+		);
+		profileShape.bezierCurveTo(
+			maxChord * 0.7, -maxThickness,
+			maxChord * 0.3, -maxThickness,
+			0, 0
+		);
+
+		const profilePoints = profileShape.extractPoints(32).shape;
+		const profileCount = profilePoints.length;
+
+		// === 2. Parámetros del barrido ===
+		const totalSpan = 5;        // Longitud total del ala (de punta a punta)
+		const segments = 80;        // Alta resolución para colapso suave
+
+		const vertices = [];
+		const indices = [];
+
+		for (let i = 0; i <= segments; i++) {
+			const t = i / segments; // 0 a 1
+
+			// === 3. Posición en Z: centrada, simétrica ===
+			const z = THREE.MathUtils.lerp(-totalSpan / 2, totalSpan / 2, t);
+			const position = new THREE.Vector3(0, 0, z);
+
+			// === 4. Escala: máxima en el centro, colapsa rápido en puntas ===
+			const distFromCenter = Math.abs(z) / (totalSpan / 2); // 0 en centro, 1 en puntas
+			let scaleFactor;
+			scaleFactor = 1 - distFromCenter * distFromCenter; // Colapso cuadrático
+
+			const scaleX = scaleFactor;
+			const scaleY = scaleFactor; // Grosor proporcional
+
+			// === 5. Marcos locales (perfil en XY, barrido en Z) ===
+			const normal = new THREE.Vector3(0, 1, 0);   // Y = grosor
+			const binormal = new THREE.Vector3(1, 0, 0); // X = cuerda
+
+			// === 6. Generar vértices del anillo ===
+			for (let j = 0; j < profileCount; j++) {
+				const p = profilePoints[j];
+				const x = p.x * scaleX;
+				const y = p.y * scaleY;
+
+				const vertex = new THREE.Vector3()
+					.copy(position)
+					.add(normal.clone().multiplyScalar(y))
+					.add(binormal.clone().multiplyScalar(x));
+
+				vertices.push(vertex.x, vertex.y, vertex.z);
+			}
+
+			// === 7. Conectar anillos ===
+			if (i < segments) {
+				const a = i * profileCount;
+				const b = a + profileCount;
+				for (let j = 0; j < profileCount; j++) {
+					const c = a + ((j + 1) % profileCount);
+					const d = b + ((j + 1) % profileCount);
+					indices.push(a + j, b + j, c);
+					indices.push(b + j, d, c);
+				}
+			}
+		}
+
+		// === 8. Geometría final ===
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+		geometry.setIndex(indices);
+		geometry.computeVertexNormals();
+
+		const material = new THREE.MeshPhongMaterial({
+			color: 0xcccccc
+		});
+
+		const wing = new THREE.Mesh(geometry, material);
+
+		return wing;
 	}
 
 	constructor(scene, camera,controls) {
@@ -232,6 +421,85 @@ export class SceneManager {
 		pista1.name = "pista";
 		const pista2 = new THREE.Mesh(block, blockMaterial);
 
+		const fighter = new THREE.Group();
+		const fuselage = this.createZeroFuselage();
+		fuselage.scale.set(1.2,1.2,1.2);
+		fighter.add(fuselage);
+		const wing1 = this.createWing();
+		const wing2 = wing1.clone();
+		wing2.scale.set(-1,1,1);
+		fighter.add(wing2);
+		wing2.position.set(1,0,-1);
+		fighter.add(wing1);
+		wing1.position.set(-1,0,-1);
+		const tailWing1 = wing1.clone();
+		tailWing1.scale.set(0.3,0.3,0.3);
+		tailWing1.position.set(0,0,5);
+		fighter.add(tailWing1);
+		const tailWing2 = tailWing1.clone();
+		tailWing2.scale.set(-0.3,0.3,0.3);
+		tailWing2.position.set(0,0,5);
+		fighter.add(tailWing2);
+		const tailWing3 = tailWing1.clone();
+		tailWing3.scale.set(0.2,0.3,0.3);
+		tailWing3.rotation.z = MathUtils.degToRad(90);
+		fighter.add(tailWing3);
+		const propellers = new THREE.Group();
+		propellers.name = "propellers";
+		fighter.add(propellers);
+		const propeller1 = this.createWing();
+		propeller1.scale.set(0.1,0.5,0.1);
+		propellers.rotation.x = MathUtils.degToRad(90);
+		propellers.position.set(0,0,-6);
+		propellers.add(propeller1);
+		const propeller2 = propeller1.clone();
+		propeller2.scale.set(0.1,0.5,0.1);
+		propeller2.rotation.y= MathUtils.degToRad(120);
+		propellers.add(propeller2);
+		const propeller3 = propeller1.clone();
+		propeller3.scale.set(0.1,0.5,0.1);
+		propeller3.rotation.y= MathUtils.degToRad(-120);
+		propellers.add(propeller3);
+		this.airplaneController = new AirplaneController(fighter,{
+			maxSpeed: 120,
+			accelResponse: 2.2,
+			drag: 0.015,
+
+			pitchLimit: THREE.MathUtils.degToRad(45),
+			bankLimit:  THREE.MathUtils.degToRad(60),
+
+			pitchCmdRateDeg: 60,
+			bankCmdRateDeg:  90,
+
+			pitchResponse: 5.0,
+			bankResponse:  6.0,
+
+			pitchCentering: 1.0,
+			bankCentering:  1.5,
+
+			turnRateGain: 1.3,
+			yawTaxiRate: Math.PI * 1.4,
+
+			stallSpeed: 12,
+			ctrlVRange: 25,
+
+			minY: 2
+		});
+		this.airplaneController.setTransform({
+			position: new THREE.Vector3(0, 2, 0),
+			euler: new THREE.Euler(0, 0, 0, 'YXZ'), // heading=0 → forward -Z
+			throttle: 0
+		});
+		document.addEventListener('keydown', (e) => {
+			if (e.code === 'KeyR') {
+				this.airplaneController.setTransform({
+				position: new THREE.Vector3(0, 2, 0),
+				euler: new THREE.Euler(0, 0, 0, 'YXZ'), // nivelado, nariz hacia -Z
+				throttle: 0
+				});
+			}
+		});
+
 		edificios.add(pista2);
 		edificios.add(torre);
 		for(let i=0; i<7; i++){
@@ -246,8 +514,11 @@ export class SceneManager {
 		edificios.position.set(25,0,-50);
 		pistas.add(pista1);
 		pistas.add(edificios);
+		pistas.add(fighter);
+		fighter.position.set(-25,7,-100);
+		fighter.rotation.y = MathUtils.degToRad(180);
 		pistas.rotateY(MathUtils.degToRad(-50));
-		pistas.position.set(100,105,-150);
+		pistas.position.set(100,100,-150);
 		islandGroup.add(pistas);
 	}
 
@@ -259,6 +530,12 @@ export class SceneManager {
     
     	if (!barquito) return;
 		destructor.rotation.y += 0.003;
+
+		const clock = new THREE.Clock();
+		const dt = Math.min(0.05, clock.getDelta()); // clamp por si se pausa un tab
+  		this.airplaneController.update(dt);
+		const propellers = this.scene.getObjectByName("propellers");
+		propellers.rotation.y += 0.5* this.airplaneController.getEnginePower()*100;
 
 		const shipWorldPos = new THREE.Vector3();
 		barquito.getWorldPosition(shipWorldPos);
