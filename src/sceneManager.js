@@ -41,7 +41,7 @@ export class SceneManager {
 
 	handleCameraSwitch = (event) => {
         const key = event.key;
-        if (['1', '4', '5', '6', '7', '8'].includes(key)) {
+        if (['1', '2', '3', '4', '5', '6', '7', '8', '9'].includes(key)) {
             this.mode = key;
             console.log('Modo cámara cambiado a:', key);
         }
@@ -275,17 +275,13 @@ export class SceneManager {
 
         scene.add( sky );
 
-		const light = new THREE.DirectionalLight(0xffffff, 1);
+		const light = new THREE.DirectionalLight(0xffffff, 3);
 
 		light.position.copy(sunPosition);
 		scene.add(light);
 
-		const ambientLight = new THREE.AmbientLight(0xffffff,0.25);
+		const ambientLight = new THREE.HemisphereLight(0xccccff, 0xaaaaaa, 0.6);
 		scene.add(ambientLight);
-
-		const grid = new THREE.GridHelper(200, 20, 0x888888, 0x444444);
-		grid.position.y = 112;
-		scene.add(grid);
 
 		const axes = new THREE.AxesHelper(100);
 		axes.position.y = 112;
@@ -422,6 +418,7 @@ export class SceneManager {
 		const pista2 = new THREE.Mesh(block, blockMaterial);
 
 		const fighter = new THREE.Group();
+		fighter.name = "Fighter";
 		const fuselage = this.createZeroFuselage();
 		fuselage.scale.set(1.2,1.2,1.2);
 		fighter.add(fuselage);
@@ -448,18 +445,19 @@ export class SceneManager {
 		propellers.name = "propellers";
 		fighter.add(propellers);
 		const propeller1 = this.createWing();
-		propeller1.scale.set(0.1,0.5,0.1);
+		propeller1.scale.set(0.2,0.5,0.1);
 		propellers.rotation.x = MathUtils.degToRad(90);
 		propellers.position.set(0,0,-6);
 		propellers.add(propeller1);
 		const propeller2 = propeller1.clone();
-		propeller2.scale.set(0.1,0.5,0.1);
+		propeller2.scale.set(0.2,0.5,0.1);
 		propeller2.rotation.y= MathUtils.degToRad(120);
 		propellers.add(propeller2);
 		const propeller3 = propeller1.clone();
-		propeller3.scale.set(0.1,0.5,0.1);
+		propeller3.scale.set(0.2,0.5,0.1);
 		propeller3.rotation.y= MathUtils.degToRad(-120);
 		propellers.add(propeller3);
+		
 		this.airplaneController = new AirplaneController(fighter,{
 			maxSpeed: 120,
 			accelResponse: 2.2,
@@ -483,19 +481,19 @@ export class SceneManager {
 			stallSpeed: 12,
 			ctrlVRange: 25,
 
-			minY: 2
+			minY: 107
 		});
 		this.airplaneController.setTransform({
-			position: new THREE.Vector3(0, 2, 0),
-			euler: new THREE.Euler(0, 0, 0, 'YXZ'), // heading=0 → forward -Z
+			position: new THREE.Vector3(150, 107, -225),
+			euler: new THREE.Euler(0, MathUtils.degToRad(130), 0, 'YXZ'),
 			throttle: 0
 		});
 		document.addEventListener('keydown', (e) => {
 			if (e.code === 'KeyR') {
 				this.airplaneController.setTransform({
-				position: new THREE.Vector3(0, 2, 0),
-				euler: new THREE.Euler(0, 0, 0, 'YXZ'), // nivelado, nariz hacia -Z
-				throttle: 0
+            		position: new THREE.Vector3(150, 107, -225),
+            		euler: new THREE.Euler(0, MathUtils.degToRad(130), 0, 'YXZ'),
+            		throttle: 0
 				});
 			}
 		});
@@ -514,12 +512,12 @@ export class SceneManager {
 		edificios.position.set(25,0,-50);
 		pistas.add(pista1);
 		pistas.add(edificios);
-		pistas.add(fighter);
-		fighter.position.set(-25,7,-100);
-		fighter.rotation.y = MathUtils.degToRad(180);
+		scene.add(fighter);
+		fighter.position.set(150,107,-225);
 		pistas.rotateY(MathUtils.degToRad(-50));
 		pistas.position.set(100,100,-150);
 		islandGroup.add(pistas);
+		this.clock = new THREE.Clock();
 	}
 
 	animate() {
@@ -531,20 +529,39 @@ export class SceneManager {
     	if (!barquito) return;
 		destructor.rotation.y += 0.003;
 
-		const clock = new THREE.Clock();
-		const dt = Math.min(0.05, clock.getDelta()); // clamp por si se pausa un tab
+		const dt = Math.min(0.05, this.clock.getDelta()); // clamp por si se pausa un tab
   		this.airplaneController.update(dt);
 		const propellers = this.scene.getObjectByName("propellers");
 		propellers.rotation.y += 0.5* this.airplaneController.getEnginePower()*100;
 
 		const shipWorldPos = new THREE.Vector3();
 		barquito.getWorldPosition(shipWorldPos);
-
+		const fighter = this.scene.getObjectByName("Fighter");
+		const airplaneWorldPos = new THREE.Vector3();
+		fighter.getWorldPosition(airplaneWorldPos);
+		let localOffset = new THREE.Vector3();
+		let worldOffset = new THREE.Vector3();
 		switch (this.mode) {
 			case '1':  // Orbital general centrada en la isla
 				this.controls.enable = true;
 				this.controls.target.set(0,0,0);  // Posición de pistas/isla
 				this.camera.position.copy(new THREE.Vector3(0, 1000, 0));
+				break;
+			case '2':  // Persecución del avión (detrás)
+				this.controls.enable = false;
+				localOffset = new THREE.Vector3(0, 10, 25);
+				worldOffset = localOffset.clone().applyQuaternion(fighter.quaternion);
+				const chaseCameraPos = airplaneWorldPos.clone().add(worldOffset);
+				this.camera.position.lerp(chaseCameraPos, 0.1);
+				this.camera.lookAt(airplaneWorldPos);
+				break;
+			case '3':  // Primera persona del avión (cockpit)
+				this.controls.enable = false;
+				fighter.getWorldPosition(airplaneWorldPos);
+				localOffset = new THREE.Vector3(0, 1.5, -3); // Posición en cockpit; ajusta valores
+				const dogfightCameraPos = localOffset.clone().applyQuaternion(fighter.quaternion).add(airplaneWorldPos);
+				this.camera.position.copy(dogfightCameraPos);
+				this.camera.quaternion.copy(fighter.quaternion);
 				break;
 			case '4':  // Orbital centrada en el barco
 				this.controls.enable = true;
@@ -553,8 +570,8 @@ export class SceneManager {
 				break;
 			case '5':  // De persecución del barco (detrás)
 				this.controls.enable = false;
-				const localOffset = new THREE.Vector3(0, 40, -120);
-				const worldOffset = localOffset.clone().applyQuaternion(destructor.quaternion);
+				localOffset = new THREE.Vector3(0, 40, -120);
+				worldOffset = localOffset.clone().applyQuaternion(destructor.quaternion);
 				const cameraPos = shipWorldPos.clone().add(worldOffset);
 				this.camera.position.lerp(cameraPos, 0.1);
 				this.camera.lookAt(shipWorldPos);
@@ -607,6 +624,9 @@ export class SceneManager {
 				this.scene.getObjectByName('pista').getWorldPosition(pistaPos);
 				this.controls.target.copy(pistaPos);
 				this.camera.position.copy(pistaPos.clone().add(new THREE.Vector3(-70, 70, 70)));
+				break;
+			case '9':  // Freecam
+				this.controls.enable = true;
 				break;
 			default:
 				break;

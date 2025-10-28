@@ -2,12 +2,12 @@ import * as THREE from 'three';
 
 // === Constantes de teclas para control del avión ===
 export const AIRPLANE_KEYS = {
-  PITCH_UP:    'ArrowUp',
-  PITCH_DOWN:  'ArrowDown',
-  BANK_LEFT:   'ArrowLeft',
-  BANK_RIGHT:  'ArrowRight',
-  THROTTLE_UP: 'PageUp',
-  THROTTLE_DN: 'PageDown'
+  PITCH_UP:    'KeyW',
+  PITCH_DOWN:  'KeyS',
+  BANK_LEFT:   'KeyA',
+  BANK_RIGHT:  'KeyD',
+  THROTTLE_UP: 'KeyE',
+  THROTTLE_DN: 'KeyQ'
 };
 
 /**
@@ -269,6 +269,9 @@ export class AirplaneController {
     if (this.obj.position.y <= this.minY) {
       this.obj.position.y = this.minY;
       this.verticalVelocity = 0;
+    }
+    if (this.throttle > 0 || Math.abs(this.pitch) > 0.01 || Math.abs(this.bank) > 0.01) {
+      console.log(this.getStatus());
     }
   }
 
