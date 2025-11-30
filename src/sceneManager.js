@@ -56,10 +56,9 @@ export class SceneManager {
 		this.scene.add(model);
 		document.addEventListener('keydown', this.handleKeyPress);
 
-		const loadShipSkin = new THREE.TextureLoader();
-		loadShipSkin.load('/lol.png', this.onShipSkinLoaded, this.onProgress, this.onLoadError);
-		const loadTurretSkin = new THREE.TextureLoader();
-		loadTurretSkin.load('/torreta_skin.jpg', this.onTurretSkinLoaded, this.onProgress, this.onLoadError);
+		const loadSkin = new THREE.TextureLoader();
+		loadSkin.load('/lol.png', this.onShipSkinLoaded, this.onProgress, this.onLoadError);
+		loadSkin.load('/torreta_skin.jpg', this.onTurretSkinLoaded, this.onProgress, this.onLoadError);
 	};
 
 	onProgress = (event) =>{
@@ -208,7 +207,7 @@ export class SceneManager {
         geometry.setIndex(indices);
         geometry.computeVertexNormals();
         
-        const material = new THREE.MeshPhongMaterial({ color: 0xaa9955, side: THREE.DoubleSide });
+        const material = new THREE.MeshPhongMaterial({ color: 0xffffff, side: THREE.DoubleSide });
         const fuselage = new THREE.Mesh(geometry, material);
         fuselage.name = 'ZeroFuselage';
         
@@ -239,12 +238,26 @@ export class SceneManager {
 		const profilePoints = profileShape.extractPoints(32).shape;
 		const profileCount = profilePoints.length;
 
+		const cumulativeLengths = new Array(profileCount);
+		cumulativeLengths[0] = 0;
+		let totalLength = 0;
+		for (let j = 1; j < profileCount; j++) {
+			const p1 = profilePoints[j - 1];
+			const p2 = profilePoints[j];
+			const dist = Math.sqrt(
+				Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2)
+			);
+			cumulativeLengths[j] = cumulativeLengths[j - 1] + dist;
+			totalLength += dist;
+		}
+
 		// === 2. Parámetros del barrido ===
 		const totalSpan = 5;        // Longitud total del ala (de punta a punta)
 		const segments = 80;        // Alta resolución para colapso suave
 
 		const vertices = [];
 		const indices = [];
+		const uvs = [];
 
 		for (let i = 0; i <= segments; i++) {
 			const t = i / segments; // 0 a 1
@@ -277,6 +290,9 @@ export class SceneManager {
 					.add(binormal.clone().multiplyScalar(x));
 
 				vertices.push(vertex.x, vertex.y, vertex.z);
+				const u = (z + totalSpan / 2) / totalSpan;
+				const v = (cumulativeLengths[j] / totalLength) * scaleFactor;
+				uvs.push(u, v);
 			}
 
 			// === 7. Conectar anillos ===
@@ -295,11 +311,12 @@ export class SceneManager {
 		// === 8. Geometría final ===
 		const geometry = new THREE.BufferGeometry();
 		geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+		geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
 		geometry.setIndex(indices);
 		geometry.computeVertexNormals();
 
 		const material = new THREE.MeshPhongMaterial({
-			color: 0xcccccc
+			color: 0xffffff
 		});
 
 		const wing = new THREE.Mesh(geometry, material);
@@ -364,63 +381,87 @@ export class SceneManager {
 		// === 4 ANILLOS CLAVE (solo donde cambia la forma) ===
 		const levels = [
 		{ y: 0,      w: 10, d: 10, uv: 0.0 },   // Base
-		{ y: 50,     w: 10, d: 10, uv: 0.3 },   // Final de fuste
-		{ y: 60,     w: 30, d: 30, uv: 0.6 },   // Inicio sala de control
+		{ y: 50,     w: 10, d: 10, uv: 0.5 },   // Final de fuste
+		{ y: 60,     w: 30, d: 30, uv: 0.75 },   // Inicio sala de control
 		{ y: 65,     w: 0,  d: 0,  uv: 1.0 }    // Punta (colapsada)
 		];
-
+		let vertexIndex = 0;
 		levels.forEach(level => {
-		const hw = level.w / 2;
-		const hd = level.d / 2;
-		// 4 vértices por anillo (orden horario)
-		vertices.push(-hw, level.y, -hd);
-		vertices.push( hw, level.y, -hd);
-		vertices.push( hw, level.y,  hd);
-		vertices.push(-hw, level.y,  hd);
+			const hw = level.w / 2;
+			const hd = level.d / 2;
+			// 4 vértices por anillo (orden horario)
+			vertices.push(-hw, level.y, -hd);
+			vertices.push( hw, level.y, -hd);
+			vertices.push( hw, level.y, -hd);
+			vertices.push( hw, level.y,  hd);
+			vertices.push(-hw, level.y,  hd);
 
-		// UVs: repite horizontal, escala vertical
-		uvs.push(0, level.uv);
-		uvs.push(1, level.uv);
-		uvs.push(1, level.uv);
-		uvs.push(0, level.uv);
+			// UVs: repite horizontal, escala vertical
+			uvs.push(0.75, level.uv);
+			uvs.push(1.00, level.uv);
+			uvs.push(0.0, level.uv);
+			uvs.push(0.25, level.uv);
+			uvs.push(0.5, level.uv);
+			if(vertexIndex > 0){
+				// Cuatro caras (cada una es un quad = 2 triángulos)
+				// Orden ajustado para normales externas (counterclockwise desde fuera)
+
+				// Cara trasera
+				indices.push(vertexIndex -4, vertexIndex -5, vertexIndex +1);
+				indices.push(vertexIndex -5, vertexIndex , vertexIndex +1);
+
+				// Cara derecha
+				indices.push(vertexIndex -3, vertexIndex -4, vertexIndex +2);
+				indices.push(vertexIndex -4, vertexIndex +1, vertexIndex +2);
+
+				// Cara frontal
+				indices.push(vertexIndex -2, vertexIndex -3, vertexIndex +3);
+				indices.push(vertexIndex -3, vertexIndex +2, vertexIndex +3);
+
+				// Cara izquierda
+				indices.push(vertexIndex -1, vertexIndex -2, vertexIndex +4);
+				indices.push(vertexIndex -2, vertexIndex +3, vertexIndex +4);
+
+				indices.push(vertexIndex -5, vertexIndex -1, vertexIndex );
+				indices.push(vertexIndex -1, vertexIndex +4, vertexIndex );
+			}
+
+			vertexIndex += 5;
 		});
-
-		// === CONECTAR ANILLOS CON QUADS (solo 4 segmentos) ===
-		for (let i = 0; i < levels.length - 1; i++) {
-			const a = i * 4;
-			const b = a + 1;
-			const c = a + 2;
-			const d = a + 3;
-			const e = a + 4;
-			const f = b + 4;
-			const g = c + 4;
-			const h = d + 4;
-
-			// Caras en sentido horario (CW) → normales externas
-			indices.push(a, f, b); indices.push(a, e, f);
-			indices.push(b, g, c); indices.push(b, f, g);
-			indices.push(c, h, d); indices.push(c, g, h);
-			indices.push(d, e, a); indices.push(d, h, e);
-		}
 
 		geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
 		geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
 		geometry.setIndex(indices);
 
 		geometry.computeVertexNormals();
+		const towerTexture = textureLoader.load('/torre_control.png');
+		const towerMaterial = new THREE.MeshPhongMaterial({ map: towerTexture });
 
-		const material = new THREE.MeshPhongMaterial({
-			color: 0xaaaaaa,
-			flatShading: true,
-		});
-
-		const torre = new THREE.Mesh(geometry, material);
+		const torre = new THREE.Mesh(geometry, towerMaterial);
 		torre.name = 'torre';
 
+		/// Barracas Central
 		const barrack = new THREE.CylinderGeometry(7.5, 7.5, 30, 32);
+		const uvArray = barrack.attributes.uv.array;
+		for(let i=0; i<uvArray.length/2; i++){
+			let u = uvArray[i*2];
+			let v = uvArray[i*2+1];
+			uvArray[i*2] = v;
+			uvArray[i*2+1] = 1-u;
+		}
 		barrack.rotateX(Math.PI / 2);
 		barrack.rotateY(Math.PI / 2);
-		const barrackMaterial = new THREE.MeshPhongMaterial({ color: 0x8b4513 });
+		const normalTexture = textureLoader.load('/metal_corrugado.jpg');
+		normalTexture.wrapS = THREE.RepeatWrapping;
+		const wallTexture = textureLoader.load('/hangar_wall.jpg');
+		const doorTexture = textureLoader.load('/hangar_door.jpg');
+		const backTexture = doorTexture.clone();
+		backTexture.flipY = false;
+		backTexture.needsUpdate = true;
+		const wallMaterial = new THREE.MeshPhongMaterial({ normalMap: normalTexture, map: wallTexture, normalScale: new THREE.Vector2(0.5, 0.5) });
+		const doorMaterial = new THREE.MeshPhongMaterial({ map: doorTexture });
+		const backMaterial = new THREE.MeshPhongMaterial({ map: backTexture });
+		const barrackMaterials = [ wallMaterial, doorMaterial, backMaterial ];
 
 		const loader = new GLTFLoader();
 		loader.load('/destructor.glb', this.onModelLoaded, this.onProgress, this.onLoadError);
@@ -433,12 +474,16 @@ export class SceneManager {
 		pista1.name = "pista";
 		const pista2 = new THREE.Mesh(block, blockMaterial);
 
+		///  Foo Fighters
 		const fighter = new THREE.Group();
 		fighter.name = "Fighter";
 		const fuselage = this.createZeroFuselage();
 		fuselage.scale.set(1.2,1.2,1.2);
 		fighter.add(fuselage);
+		const wingTexture = textureLoader.load('/wing.png');
+		const wingMaterial = new THREE.MeshPhongMaterial({ map: wingTexture , side: THREE.DoubleSide });
 		const wing1 = this.createWing();
+		wing1.material = wingMaterial;
 		const wing2 = wing1.clone();
 		wing2.scale.set(-1,1,1);
 		fighter.add(wing2);
@@ -461,6 +506,7 @@ export class SceneManager {
 		propellers.name = "propellers";
 		fighter.add(propellers);
 		const propeller1 = this.createWing();
+		propeller1.material.color = new THREE.Color(0x000000);
 		propeller1.scale.set(0.2,0.5,0.1);
 		propellers.rotation.x = MathUtils.degToRad(90);
 		propellers.position.set(0,0,-6);
@@ -517,7 +563,7 @@ export class SceneManager {
 		edificios.add(pista2);
 		edificios.add(torre);
 		for(let i=0; i<7; i++){
-			const barrackN = new THREE.Mesh(barrack, barrackMaterial);
+			const barrackN = new THREE.Mesh(barrack, barrackMaterials);
 			barrackN.position.set(0,5,62.5 - i*17.5);
 			edificios.add(barrackN);
 		}
