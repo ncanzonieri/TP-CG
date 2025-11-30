@@ -37,7 +37,7 @@ export class SceneManager {
 			default:
 				break;
 		}
-	}
+	};
 
 	handleCameraSwitch = (event) => {
         const key = event.key;
@@ -55,15 +55,67 @@ export class SceneManager {
 		model.name = 'Destructor';
 		this.scene.add(model);
 		document.addEventListener('keydown', this.handleKeyPress);
-	}
+
+		const loadShipSkin = new THREE.TextureLoader();
+		loadShipSkin.load('/lol.png', this.onShipSkinLoaded, this.onProgress, this.onLoadError);
+		const loadTurretSkin = new THREE.TextureLoader();
+		loadTurretSkin.load('/torreta_skin.jpg', this.onTurretSkinLoaded, this.onProgress, this.onLoadError);
+	};
 
 	onProgress = (event) =>{
 		console.log((event.loaded / event.total * 100) + '% cargado');
-	}
+	};
 
 	onLoadError = (error) => {
 		console.error('Error al cargar: ', error);
-	}
+	};
+
+	onTextureLoaded = (heightMap) => {
+		console.log('Heightmap cargado correctamente');
+
+		heightMap.minFilter = THREE.LinearFilter;
+		heightMap.magFilter = THREE.LinearFilter;
+		heightMap.anisotropy = 16;
+
+		const islandSize = 1000;
+		const segments = 256;
+
+		const islandGeometry = new THREE.PlaneGeometry(islandSize, islandSize, segments, segments);
+		islandGeometry.rotateX(-Math.PI / 2);
+
+		const islandMaterial = new THREE.MeshPhongMaterial({
+		displacementMap: heightMap,
+		displacementScale: 112,
+		displacementBias: 0,
+		color: 0x3a5f3a,
+		side: THREE.DoubleSide
+		});
+
+		const island = new THREE.Mesh(islandGeometry, islandMaterial);
+		island.position.y = -10;
+		const islandGroup = this.scene.getObjectByName('islandGroup');
+		islandGroup.add(island);
+	};
+
+	onShipSkinLoaded = (map) => {
+		console.log('Mapa de colores del destructor cargado correctamente: ', map);
+		map.flipY = false;
+		const destructor = this.scene.getObjectByName('destructor');
+		if (destructor) {
+			destructor.material.map = map;
+			destructor.material.needsUpdate = true;
+		}
+	};
+
+	onTurretSkinLoaded = (map) => {
+		console.log('Mapa de colores de la torreta cargado correctamente: ', map);
+		map.flipY = false;
+		const torreta = this.scene.getObjectByName('torreta');
+		if (torreta) {
+			torreta.material.map = map;
+			torreta.material.needsUpdate = true;
+		}
+	};
 
 	createZeroFuselage() {
         // ... (Secciones 1 y 2 - Perfil y Parámetros - sin cambios)
@@ -299,46 +351,10 @@ export class SceneManager {
 		scene.add(water);
 
 		const islandGroup = new THREE.Group();
-		scene.add(islandGroup);
-
+		islandGroup.name = 'islandGroup';
+		this.scene.add(islandGroup);
 		const textureLoader = new THREE.TextureLoader();
-
-		textureLoader.load(
-			'/iwojima.png',
-
-			(heightMap) => {
-				console.log('Heightmap cargado correctamente');
-
-				heightMap.minFilter = THREE.LinearFilter;
-				heightMap.magFilter = THREE.LinearFilter;
-				heightMap.anisotropy = 16;
-
-				const islandSize = 1000;
-				const segments = 256;
-
-				const islandGeometry = new THREE.PlaneGeometry(islandSize, islandSize, segments, segments);
-				islandGeometry.rotateX(-Math.PI / 2);
-
-				const islandMaterial = new THREE.MeshPhongMaterial({
-				displacementMap: heightMap,
-				displacementScale: 112,
-				displacementBias: 0,
-				color: 0x3a5f3a,
-				side: THREE.DoubleSide
-				});
-
-				const island = new THREE.Mesh(islandGeometry, islandMaterial);
-				island.position.y = -10;
-				islandGroup.add(island);
-			},
-
-			undefined,
-
-			(error) => {
-				console.error('Error al cargar iwojima.png:', error);
-				console.warn('Asegúrate de que el archivo esté en: public/iwojima.png');
-			}
-		);
+		textureLoader.load('/iwojima.png', this.onTextureLoaded, this.onProgress, this.onLoadError);
 
 		const geometry = new THREE.BufferGeometry();
 		const vertices = [];
