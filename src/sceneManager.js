@@ -86,8 +86,7 @@ export class SceneManager {
 		displacementMap: heightMap,
 		displacementScale: 112,
 		displacementBias: 0,
-		color: 0x3a5f3a,
-		side: THREE.DoubleSide
+		color: 0x3a5f3a
 		});
 
 		const island = new THREE.Mesh(islandGeometry, islandMaterial);
@@ -117,7 +116,6 @@ export class SceneManager {
 	};
 
 	createZeroFuselage() {
-        // ... (Secciones 1 y 2 - Perfil y Parámetros - sin cambios)
         const radius = 1;
         const profileShape = new THREE.Shape();
         profileShape.absellipse(0, 0, radius, radius, 0, Math.PI * 2, false, 0); 
@@ -127,19 +125,13 @@ export class SceneManager {
 
         const length = 10;
         const segments = 50; 
-        
-        // El recorrido es una línea recta a lo largo del eje Z
-        // No necesitamos FrenetFrames para una línea recta simple.
 
         const vertices = [];
         const indices = [];
 
-        // --- 4. Iterar y Aplicar Escala Variable ---
         for (let i = 0; i <= segments; i++) {
-            const t = i / segments; // Valor normalizado del recorrido (0.0 a 1.0)
+            const t = i / segments;
             
-            // ------------------------------------------------------------------
-            // CÁLCULO DE ESCALA (Sin cambios)
             let scaleFactor;
             if (t <= 0.05) {
                 scaleFactor = t / 0.05;
@@ -151,34 +143,18 @@ export class SceneManager {
             }
             const scaleX = scaleFactor * 1.0; 
             const scaleY = scaleFactor * 0.9; 
-            // ------------------------------------------------------------------
-            
-            // CÁLCULO MANUAL DE POSICIÓN Y MARCOS PARA LÍNEA RECTA
-            
-            // 1. Posición: Interpolación lineal a lo largo del eje Z
-            // Z va de -length/2 a +length/2
+
             const z = THREE.MathUtils.lerp(-length / 2, length / 2, t);
             const position = new THREE.Vector3(0, 0, z);
 
-            // 2. Marcos de orientación (para que el perfil esté perpendicular a la línea Z)
-            // Normal (Vertical): Eje Y local
             const normal = new THREE.Vector3(0, 1, 0); 
-            // Binormal (Horizontal): Eje X local
             const binormal = new THREE.Vector3(1, 0, 0); 
-            // La tangente es (0, 0, 1) y no se usa directamente en la fórmula P = Pos + ...
             
-            // Transformar puntos 2D del perfil a 3D
             for (let j = 0; j < profileCount; j++) {
                 const profilePoint = profilePoints[j];
                 
-                // Aplicar escala y mover al espacio 3D
                 const x = profilePoint.x * scaleX;
                 const y = profilePoint.y * scaleY;
-                
-                // La posición final es:
-                // Posición de la línea (position)
-                // + Desplazamiento vertical (normal * y)
-                // + Desplazamiento horizontal (binormal * x)
                 
                 const vertex = new THREE.Vector3().copy(position);
                 vertex.add(normal.clone().multiplyScalar(y));
@@ -187,7 +163,6 @@ export class SceneManager {
                 vertices.push(vertex.x, vertex.y, vertex.z);
             }
             
-            // --- Conexión de Anillos (sin cambios) ---
             if (i < segments) {
                 const a = i * profileCount;
                 const b = a + profileCount;
@@ -201,7 +176,6 @@ export class SceneManager {
             }
         }
         
-        // --- 5. Finalizar la Geometría (sin cambios) ---
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
         geometry.setIndex(indices);
@@ -210,9 +184,6 @@ export class SceneManager {
         const material = new THREE.MeshPhongMaterial({ color: 0xffffff, side: THREE.DoubleSide });
         const fuselage = new THREE.Mesh(geometry, material);
         fuselage.name = 'ZeroFuselage';
-        
-        // La rotación en X está correcta para alinear el fuselaje con la escena.
-        //fuselage.rotation.x = Math.PI / 2; 
 
         return fuselage;
     }
@@ -322,6 +293,78 @@ export class SceneManager {
 		const wing = new THREE.Mesh(geometry, material);
 
 		return wing;
+	}
+
+	createLandingGear() {
+		const gear = new THREE.Group();
+
+		const wheelProfile = [
+			new THREE.Vector2(0.60, 0.00), // borde exterior (radio)
+			new THREE.Vector2(0.55, 0.08),
+			new THREE.Vector2(0.45, 0.16),
+			new THREE.Vector2(0.30, 0.24), // pared de llanta
+			new THREE.Vector2(0.18, 0.32),
+			new THREE.Vector2(0.08, 0.24),
+			new THREE.Vector2(0.04, 0.12),
+			new THREE.Vector2(0.00, 0.00)  // centro: X = 0 (eje)
+		];
+
+		// Más segmentos mejora la apariencia exterior
+		const wheelGeom = new THREE.LatheGeometry(wheelProfile, 64);
+		wheelGeom.computeVertexNormals();
+
+		// Material: usar DoubleSide evita que una cara invertida desaparezca
+		const wheelMat = new THREE.MeshPhongMaterial({
+			color: 0x111111,
+			shininess: 30,
+			side: THREE.DoubleSide
+		});
+
+		const wheel = new THREE.Mesh(wheelGeom, wheelMat);
+		wheel.castShadow = true;
+		wheel.receiveShadow = true;
+
+		// Ajustes: centrar el eje de rotación de la rueda
+		wheel.rotation.x = Math.PI / 2;
+		wheel.rotation.z = Math.PI / 2;
+
+		const legGeometry = new THREE.BoxGeometry(0.1, 1, 0.1);
+		const legMaterial = new THREE.MeshPhongMaterial({ color: 0x555555, shininess: 10 });
+		const leg = new THREE.Mesh(legGeometry, legMaterial);
+
+		// --- 3) Uniones y posicionamiento dentro del group ---
+		// colocamos la rueda al extremo de la pierna:
+		wheel.position.set(0, -1, 0);
+
+		gear.add(leg);
+		gear.add(wheel);
+
+		return gear;
+	}
+
+	// Rueda de cola simple (pequeña)
+	createTailWheel() {
+		const tail = new THREE.Group();
+		const profile = [
+			new THREE.Vector2(0.24, 0.00),
+			new THREE.Vector2(0.20, 0.08),
+			new THREE.Vector2(0.16, 0.12),
+			new THREE.Vector2(0.08, 0.08),
+			new THREE.Vector2(0.00, 0.00)
+		];
+
+		const g = new THREE.LatheGeometry(profile, 48);
+		g.computeVertexNormals();
+
+		const m = new THREE.MeshPhongMaterial({
+			color: 0x111111,
+			side: THREE.DoubleSide
+		});
+		const wheel = new THREE.Mesh(g, m);
+		wheel.rotation.x = Math.PI/2;
+		wheel.rotation.z = Math.PI/2;
+		tail.add(wheel);
+		return tail;
 	}
 
 	constructor(scene, camera,controls) {
@@ -519,6 +562,17 @@ export class SceneManager {
 		propeller3.scale.set(0.2,0.5,0.1);
 		propeller3.rotation.y= MathUtils.degToRad(-120);
 		propellers.add(propeller3);
+		const leftGear = this.createLandingGear();
+		leftGear.name = "leftGear";
+		leftGear.position.set(-4, -0.5, 0);
+		const rightGear = this.createLandingGear();
+		rightGear.name = "rightGear";
+		rightGear.position.set(-4, -0.5, 0);
+		const tailWheel = this.createTailWheel();
+		tailWheel.position.set(0, -0.5, 5.0);
+		wing1.add(leftGear);
+		wing2.add(rightGear);
+		fighter.add(tailWheel);
 		
 		this.airplaneController = new AirplaneController(fighter,{
 			maxSpeed: 120,
@@ -587,6 +641,8 @@ export class SceneManager {
 		const barquito = this.scene.getObjectByName("destructor");
 		const torreta = this.scene.getObjectByName("torreta");
 		const canon = this.scene.getObjectByName("canon");
+		const leftGear = this.scene.getObjectByName("leftGear");
+		const rightGear = this.scene.getObjectByName("rightGear");
     
     	if (!barquito) return;
 		destructor.rotation.y += 0.003;
@@ -595,6 +651,13 @@ export class SceneManager {
   		this.airplaneController.update(dt);
 		const propellers = this.scene.getObjectByName("propellers");
 		propellers.rotation.y += 0.5* this.airplaneController.getEnginePower()*100;
+		if(this.airplaneController.isAirborne()){
+			leftGear.rotation.z = Math.min(leftGear.rotation.z + dt * 1.5, Math.PI / 4);
+			rightGear.rotation.z = Math.min(rightGear.rotation.z + dt * 1.5, Math.PI / 4);
+		}else{
+			leftGear.rotation.z = Math.max(leftGear.rotation.z - dt * 1.5, 0);
+			rightGear.rotation.z = Math.max(rightGear.rotation.z - dt * 1.5, 0);
+		}
 
 		const shipWorldPos = new THREE.Vector3();
 		barquito.getWorldPosition(shipWorldPos);

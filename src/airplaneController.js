@@ -275,6 +275,10 @@ export class AirplaneController {
     }
   }
 
+  isAirborne(){
+    return (this.obj.position.y > this.minY + 1e-4);
+  }
+
   getStatus(){
     return {
       throttle: this.throttle,
