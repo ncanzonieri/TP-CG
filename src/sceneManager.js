@@ -82,12 +82,22 @@ export class SceneManager {
 		const islandGeometry = new THREE.PlaneGeometry(islandSize, islandSize, segments, segments);
 		islandGeometry.rotateX(-Math.PI / 2);
 
+		const textureLoader = new THREE.TextureLoader();
+		const islandTexture = textureLoader.load('/grass.jpg');
+		const islandNormal = textureLoader.load('/grass_normal_map.jpg');
+		islandNormal.wrapS = THREE.RepeatWrapping;
+		islandNormal.wrapT = THREE.RepeatWrapping;
+		islandNormal.repeat = new THREE.Vector2(10,10);
+
 		const islandMaterial = new THREE.MeshPhongMaterial({
-		displacementMap: heightMap,
-		displacementScale: 112,
-		displacementBias: 0,
-		color: 0x3a5f3a
+			displacementMap: heightMap,
+			displacementScale: 112,
+			displacementBias: 0,
+			normalMap: islandNormal,
+			normalScale: new THREE.Vector2(0.1,0.1),
+			map: islandTexture
 		});
+		islandMaterial.name = "islandMaterial";
 
 		const island = new THREE.Mesh(islandGeometry, islandMaterial);
 		island.position.y = -10;
@@ -402,8 +412,17 @@ export class SceneManager {
         const waterGeometry = new THREE.PlaneGeometry(50000, 50000);
 		waterGeometry.rotateX(-Math.PI / 2);
 
+		const textureLoader = new THREE.TextureLoader();
+		const seaTexture = textureLoader.load('/sea.jpg');
+		seaTexture.repeat = new THREE.Vector2(6,6);
+		seaTexture.wrapS = THREE.RepeatWrapping;
+		seaTexture.wrapT = THREE.RepeatWrapping;
+		const seaNormal = textureLoader.load('/sea_normal_map.jpeg');
+		seaNormal.repeat = new THREE.Vector2(6,6);
+		seaNormal.wrapS = THREE.RepeatWrapping;
+		seaNormal.wrapT = THREE.RepeatWrapping;
 		const waterMaterial = new THREE.MeshPhongMaterial({
-			color: 0x1e90ff,
+			 normalMap: seaNormal, map: seaTexture, normalScale: new THREE.Vector2(0.7, 0.7),
 		});
 
 		const water = new THREE.Mesh(waterGeometry, waterMaterial);
@@ -413,7 +432,6 @@ export class SceneManager {
 		const islandGroup = new THREE.Group();
 		islandGroup.name = 'islandGroup';
 		this.scene.add(islandGroup);
-		const textureLoader = new THREE.TextureLoader();
 		textureLoader.load('/iwojima.png', this.onTextureLoaded, this.onProgress, this.onLoadError);
 
 		const geometry = new THREE.BufferGeometry();
@@ -509,11 +527,21 @@ export class SceneManager {
 		const loader = new GLTFLoader();
 		loader.load('/destructor.glb', this.onModelLoaded, this.onProgress, this.onLoadError);
 
+		const asphalt = textureLoader.load('/asphalt.jpg');
+		asphalt.wrapT = THREE.MirroredRepeatWrapping;
+		asphalt.wrapS = THREE.MirroredRepeatWrapping;
+		asphalt.repeat = new THREE.Vector2(1,2);
+		const asphalt2 = textureLoader.load('/pista.jpg');
+		asphalt2.wrapT = THREE.MirroredRepeatWrapping;
+		asphalt2.wrapS = THREE.MirroredRepeatWrapping;
+		asphalt2.repeat = new THREE.Vector2(1,4);
+		const asphaltNormal = textureLoader.load('asphalt_normal.jpg');
 		const pistas = new THREE.Group();
 		const edificios = new THREE.Group();
 		const block = new THREE.BoxGeometry(10, 10, 10);
-		const blockMaterial = new THREE.MeshPhongMaterial({ color: 0x7d7d7d });
-		const pista1 = new THREE.Mesh(block, blockMaterial);
+		const blockMaterial = new THREE.MeshPhongMaterial({ map: asphalt, normalMap: asphaltNormal, normalScale: new THREE.Vector2(0.1,0.1) });
+		const blockMaterial2 = new THREE.MeshPhongMaterial({ map: asphalt2, normalMap: asphaltNormal, normalScale: new THREE.Vector2(0.1,0.1) });
+		const pista1 = new THREE.Mesh(block, blockMaterial2);
 		pista1.name = "pista";
 		const pista2 = new THREE.Mesh(block, blockMaterial);
 
