@@ -2,8 +2,6 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { MathUtils } from 'three';
 import { Vector3 } from 'three';
-import { ExtrudeGeometry, Shape } from 'three';
-import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { AirplaneController, AIRPLANE_KEYS } from './airplaneController.js';
 
@@ -34,6 +32,31 @@ export class SceneManager {
 					canon.rotation.z = Math.max(canon.rotation.z, MathUtils.degToRad(-90));
 				}
 				break;
+			case ' ':
+				if(canon) {
+					const points = [];
+					points.push(new THREE.Vector2(5,0));
+					points.push(new THREE.Vector2(5,10));
+					for(let i=0; i< 10; i++){
+						points.push(new THREE.Vector2(5*Math.cos(i*Math.PI/20),10+5*Math.sin(i*Math.PI/20)));
+					}
+					const bullet = new THREE.Mesh(new THREE.LatheGeometry(points),new THREE.MeshPhongMaterial({color: 0xaaaaaa, side: THREE.DoubleSide}));
+					// bullet.scale.set(0.1,0.1,0.1);
+					this.scene.add(bullet);
+					
+					const localPos = new THREE.Vector3(0, 5, 0);
+					const worldPos = localPos.clone().applyMatrix4(canon.matrixWorld);
+
+					const localDir = new THREE.Vector3(0, 1, 0);
+					const worldDir = localDir.clone().applyMatrix4(canon.matrixWorld).sub(canon.getWorldPosition(new THREE.Vector3())).normalize();
+
+					bullet.position.copy(worldPos);
+					const velocity = worldDir.clone().multiplyScalar(this.baseSpeed);
+					const initialDir = velocity.clone().normalize();
+					bullet.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), initialDir);
+					this.bullets.push({mesh: bullet, velocity: velocity, oldPos: worldPos.clone()});
+				}
+				break;
 			default:
 				break;
 		}
@@ -59,6 +82,11 @@ export class SceneManager {
 		const loadSkin = new THREE.TextureLoader();
 		loadSkin.load('/lol.png', this.onShipSkinLoaded, this.onProgress, this.onLoadError);
 		loadSkin.load('/torreta_skin.jpg', this.onTurretSkinLoaded, this.onProgress, this.onLoadError);
+		glb.scene.traverse((child) => {
+			if(child.isMesh){
+				child.material.clippingPlanes = new THREE.Plane(new THREE.Vector3(0, 1, 0), -5);
+			}
+		})
 	};
 
 	onProgress = (event) =>{
@@ -82,6 +110,51 @@ export class SceneManager {
 		const islandGeometry = new THREE.PlaneGeometry(islandSize, islandSize, segments, segments);
 		islandGeometry.rotateX(-Math.PI / 2);
 
+		const width = heightMap.image.width;
+		const height = heightMap.image.height;
+		const canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		const ctx = canvas.getContext('2d');
+		ctx.drawImage(heightMap.image, 0, 0);
+		const pixelData = ctx.getImageData(0, 0, width, height).data;
+
+		const positions = islandGeometry.attributes.position;
+		const uvs = islandGeometry.attributes.uv;
+		const gridSize = segments + 1;
+		for (let i = 0; i < positions.count; i++) {
+			const u = uvs.getX(i);
+			const v = uvs.getY(i);
+
+			const px = Math.floor(u * (width - 1));
+			const py = Math.floor((1-v) * (height - 1));
+			const index = (py * width + px) * 4;
+			const heightValue = pixelData[index] / 255;
+
+			const y = heightValue * 112 - 5;
+			positions.setY(i, y);
+		}
+		const smoothPasses = 2;
+		for (let pass = 0; pass < smoothPasses; pass++) {
+			const temp = positions.array.slice();
+			for (let i = 0; i < positions.count; i++) {
+				const x = i % gridSize;
+				const z = Math.floor(i / gridSize);
+				let sum = temp[i*3 + 1];
+				let count = 1;
+				if (x > 0)          { sum += temp[(i-1)*3 +1]; count++; }
+				if (x < gridSize-1) { sum += temp[(i+1)*3 +1]; count++; }
+				if (z > 0)          { sum += temp[(i-gridSize)*3 +1]; count++; }
+				if (z < gridSize-1) { sum += temp[(i+gridSize)*3 +1]; count++; }
+				positions.setY(i, sum / count);
+			}
+		}
+
+		islandGeometry.attributes.position.needsUpdate = true;
+		islandGeometry.computeVertexNormals();
+		islandGeometry.computeBoundingBox();
+		islandGeometry.computeBoundingSphere();
+
 		const textureLoader = new THREE.TextureLoader();
 		const islandTexture = textureLoader.load('/grass.jpg');
 		const islandNormal = textureLoader.load('/grass_normal_map.jpg');
@@ -90,18 +163,20 @@ export class SceneManager {
 		islandNormal.repeat = new THREE.Vector2(10,10);
 
 		const islandMaterial = new THREE.MeshPhongMaterial({
-			displacementMap: heightMap,
-			displacementScale: 112,
-			displacementBias: 0,
 			normalMap: islandNormal,
 			normalScale: new THREE.Vector2(0.1,0.1),
-			map: islandTexture
+			map: islandTexture,
+			clippingPlanes: new THREE.Plane(new THREE.Vector3(0, 1, 0), -5),
+			side: THREE.DoubleSide
 		});
 		islandMaterial.name = "islandMaterial";
 
 		const island = new THREE.Mesh(islandGeometry, islandMaterial);
 		island.position.y = -10;
 		const islandGroup = this.scene.getObjectByName('islandGroup');
+		island.updateMatrixWorld(true);
+		this.collideable.push(islandGroup);
+		this.collideable.push(island);
 		islandGroup.add(island);
 	};
 
@@ -191,7 +266,7 @@ export class SceneManager {
         geometry.setIndex(indices);
         geometry.computeVertexNormals();
         
-        const material = new THREE.MeshPhongMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+        const material = new THREE.MeshPhongMaterial({ color: 0xffffff, side: THREE.DoubleSide});
         const fuselage = new THREE.Mesh(geometry, material);
         fuselage.name = 'ZeroFuselage';
 
@@ -199,7 +274,6 @@ export class SceneManager {
     }
 
 	createWing() {
-		// === 1. Perfil 2D: medio óvalo simétrico (arriba y abajo) ===
 		const maxChord = 10;
 		const maxThickness = 0.25;
 
@@ -232,34 +306,29 @@ export class SceneManager {
 			totalLength += dist;
 		}
 
-		// === 2. Parámetros del barrido ===
-		const totalSpan = 5;        // Longitud total del ala (de punta a punta)
-		const segments = 80;        // Alta resolución para colapso suave
+		const totalSpan = 5;
+		const segments = 80;
 
 		const vertices = [];
 		const indices = [];
 		const uvs = [];
 
 		for (let i = 0; i <= segments; i++) {
-			const t = i / segments; // 0 a 1
+			const t = i / segments;
 
-			// === 3. Posición en Z: centrada, simétrica ===
 			const z = THREE.MathUtils.lerp(-totalSpan / 2, totalSpan / 2, t);
 			const position = new THREE.Vector3(0, 0, z);
 
-			// === 4. Escala: máxima en el centro, colapsa rápido en puntas ===
-			const distFromCenter = Math.abs(z) / (totalSpan / 2); // 0 en centro, 1 en puntas
+			const distFromCenter = Math.abs(z) / (totalSpan / 2);
 			let scaleFactor;
-			scaleFactor = 1 - distFromCenter * distFromCenter; // Colapso cuadrático
+			scaleFactor = 1 - distFromCenter * distFromCenter;
 
 			const scaleX = scaleFactor;
-			const scaleY = scaleFactor; // Grosor proporcional
+			const scaleY = scaleFactor;
 
-			// === 5. Marcos locales (perfil en XY, barrido en Z) ===
-			const normal = new THREE.Vector3(0, 1, 0);   // Y = grosor
-			const binormal = new THREE.Vector3(1, 0, 0); // X = cuerda
+			const normal = new THREE.Vector3(0, 1, 0);
+			const binormal = new THREE.Vector3(1, 0, 0);
 
-			// === 6. Generar vértices del anillo ===
 			for (let j = 0; j < profileCount; j++) {
 				const p = profilePoints[j];
 				const x = p.x * scaleX;
@@ -276,7 +345,6 @@ export class SceneManager {
 				uvs.push(u, v);
 			}
 
-			// === 7. Conectar anillos ===
 			if (i < segments) {
 				const a = i * profileCount;
 				const b = a + profileCount;
@@ -289,7 +357,6 @@ export class SceneManager {
 			}
 		}
 
-		// === 8. Geometría final ===
 		const geometry = new THREE.BufferGeometry();
 		geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
 		geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
@@ -309,32 +376,29 @@ export class SceneManager {
 		const gear = new THREE.Group();
 
 		const wheelProfile = [
-			new THREE.Vector2(0.60, 0.00), // borde exterior (radio)
+			new THREE.Vector2(0.60, 0.00),
 			new THREE.Vector2(0.55, 0.08),
 			new THREE.Vector2(0.45, 0.16),
-			new THREE.Vector2(0.30, 0.24), // pared de llanta
+			new THREE.Vector2(0.30, 0.24), 
 			new THREE.Vector2(0.18, 0.32),
 			new THREE.Vector2(0.08, 0.24),
 			new THREE.Vector2(0.04, 0.12),
-			new THREE.Vector2(0.00, 0.00)  // centro: X = 0 (eje)
+			new THREE.Vector2(0.00, 0.00) 
 		];
 
-		// Más segmentos mejora la apariencia exterior
 		const wheelGeom = new THREE.LatheGeometry(wheelProfile, 64);
 		wheelGeom.computeVertexNormals();
 
-		// Material: usar DoubleSide evita que una cara invertida desaparezca
 		const wheelMat = new THREE.MeshPhongMaterial({
 			color: 0x111111,
 			shininess: 30,
-			side: THREE.DoubleSide
+			side: THREE.DoubleSide,
 		});
 
 		const wheel = new THREE.Mesh(wheelGeom, wheelMat);
 		wheel.castShadow = true;
 		wheel.receiveShadow = true;
 
-		// Ajustes: centrar el eje de rotación de la rueda
 		wheel.rotation.x = Math.PI / 2;
 		wheel.rotation.z = Math.PI / 2;
 
@@ -342,8 +406,6 @@ export class SceneManager {
 		const legMaterial = new THREE.MeshPhongMaterial({ color: 0x555555, shininess: 10 });
 		const leg = new THREE.Mesh(legGeometry, legMaterial);
 
-		// --- 3) Uniones y posicionamiento dentro del group ---
-		// colocamos la rueda al extremo de la pierna:
 		wheel.position.set(0, -1, 0);
 
 		gear.add(leg);
@@ -352,7 +414,6 @@ export class SceneManager {
 		return gear;
 	}
 
-	// Rueda de cola simple (pequeña)
 	createTailWheel() {
 		const tail = new THREE.Group();
 		const profile = [
@@ -382,9 +443,16 @@ export class SceneManager {
 		this.camera = camera;
 		this.controls = controls;
 		this.mode = 1;
+		this.gravity = 200;
+		this.baseSpeed = 500;
+		this.bullets = [];
+		this.explosions = [];
+		this.collideable = [];
+		this.raycaster = new THREE.Raycaster();
 
 		document.addEventListener('keypress', this.handleCameraSwitch);
 
+		// Skybox
         const sky = new Sky();
 
         sky.scale.setScalar( 450000 );
@@ -409,6 +477,7 @@ export class SceneManager {
 		axes.position.y = 112;
 		scene.add(axes);
 
+		// Sea
         const waterGeometry = new THREE.PlaneGeometry(50000, 50000);
 		waterGeometry.rotateX(-Math.PI / 2);
 
@@ -422,24 +491,27 @@ export class SceneManager {
 		seaNormal.wrapS = THREE.RepeatWrapping;
 		seaNormal.wrapT = THREE.RepeatWrapping;
 		const waterMaterial = new THREE.MeshPhongMaterial({
-			 normalMap: seaNormal, map: seaTexture, normalScale: new THREE.Vector2(0.7, 0.7),
+			normalMap: seaNormal, 
+			map: seaTexture, 
+			normalScale: new THREE.Vector2(0.7, 0.7)
 		});
 
 		const water = new THREE.Mesh(waterGeometry, waterMaterial);
 		water.position.y = 5;
 		scene.add(water);
 
+		// Islands
 		const islandGroup = new THREE.Group();
 		islandGroup.name = 'islandGroup';
 		this.scene.add(islandGroup);
 		textureLoader.load('/iwojima.png', this.onTextureLoaded, this.onProgress, this.onLoadError);
 
-		const geometry = new THREE.BufferGeometry();
+		// Torre de control
+		const towerGeometry = new THREE.BufferGeometry();
 		const vertices = [];
 		const indices = [];
 		const uvs = [];
 
-		// === 4 ANILLOS CLAVE (solo donde cambia la forma) ===
 		const levels = [
 		{ y: 0,      w: 10, d: 10, uv: 0.0 },   // Base
 		{ y: 50,     w: 10, d: 10, uv: 0.5 },   // Final de fuste
@@ -450,36 +522,27 @@ export class SceneManager {
 		levels.forEach(level => {
 			const hw = level.w / 2;
 			const hd = level.d / 2;
-			// 4 vértices por anillo (orden horario)
 			vertices.push(-hw, level.y, -hd);
 			vertices.push( hw, level.y, -hd);
 			vertices.push( hw, level.y, -hd);
 			vertices.push( hw, level.y,  hd);
 			vertices.push(-hw, level.y,  hd);
 
-			// UVs: repite horizontal, escala vertical
 			uvs.push(0.75, level.uv);
 			uvs.push(1.00, level.uv);
 			uvs.push(0.0, level.uv);
 			uvs.push(0.25, level.uv);
 			uvs.push(0.5, level.uv);
 			if(vertexIndex > 0){
-				// Cuatro caras (cada una es un quad = 2 triángulos)
-				// Orden ajustado para normales externas (counterclockwise desde fuera)
-
-				// Cara trasera
 				indices.push(vertexIndex -4, vertexIndex -5, vertexIndex +1);
 				indices.push(vertexIndex -5, vertexIndex , vertexIndex +1);
 
-				// Cara derecha
 				indices.push(vertexIndex -3, vertexIndex -4, vertexIndex +2);
 				indices.push(vertexIndex -4, vertexIndex +1, vertexIndex +2);
 
-				// Cara frontal
 				indices.push(vertexIndex -2, vertexIndex -3, vertexIndex +3);
 				indices.push(vertexIndex -3, vertexIndex +2, vertexIndex +3);
 
-				// Cara izquierda
 				indices.push(vertexIndex -1, vertexIndex -2, vertexIndex +4);
 				indices.push(vertexIndex -2, vertexIndex +3, vertexIndex +4);
 
@@ -490,15 +553,15 @@ export class SceneManager {
 			vertexIndex += 5;
 		});
 
-		geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-		geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-		geometry.setIndex(indices);
+		towerGeometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+		towerGeometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+		towerGeometry.setIndex(indices);
 
-		geometry.computeVertexNormals();
+		towerGeometry.computeVertexNormals();
 		const towerTexture = textureLoader.load('/torre_control.png');
-		const towerMaterial = new THREE.MeshPhongMaterial({ map: towerTexture });
+		const towerMaterial = new THREE.MeshPhongMaterial({ map: towerTexture});
 
-		const torre = new THREE.Mesh(geometry, towerMaterial);
+		const torre = new THREE.Mesh(towerGeometry, towerMaterial);
 		torre.name = 'torre';
 
 		/// Barracas Central
@@ -519,14 +582,15 @@ export class SceneManager {
 		const backTexture = doorTexture.clone();
 		backTexture.flipY = false;
 		backTexture.needsUpdate = true;
-		const wallMaterial = new THREE.MeshPhongMaterial({ normalMap: normalTexture, map: wallTexture, normalScale: new THREE.Vector2(0.5, 0.5) });
-		const doorMaterial = new THREE.MeshPhongMaterial({ map: doorTexture });
-		const backMaterial = new THREE.MeshPhongMaterial({ map: backTexture });
+		const wallMaterial = new THREE.MeshPhongMaterial({ normalMap: normalTexture, map: wallTexture, normalScale: new THREE.Vector2(0.5, 0.5)});
+		const doorMaterial = new THREE.MeshPhongMaterial({ map: doorTexture});
+		const backMaterial = new THREE.MeshPhongMaterial({ map: backTexture});
 		const barrackMaterials = [ wallMaterial, doorMaterial, backMaterial ];
 
 		const loader = new GLTFLoader();
 		loader.load('/destructor.glb', this.onModelLoaded, this.onProgress, this.onLoadError);
 
+		// Pistas
 		const asphalt = textureLoader.load('/asphalt.jpg');
 		asphalt.wrapT = THREE.MirroredRepeatWrapping;
 		asphalt.wrapS = THREE.MirroredRepeatWrapping;
@@ -540,17 +604,20 @@ export class SceneManager {
 		const edificios = new THREE.Group();
 		const block = new THREE.BoxGeometry(10, 10, 10);
 		const blockMaterial = new THREE.MeshPhongMaterial({ map: asphalt, normalMap: asphaltNormal, normalScale: new THREE.Vector2(0.1,0.1) });
-		const blockMaterial2 = new THREE.MeshPhongMaterial({ map: asphalt2, normalMap: asphaltNormal, normalScale: new THREE.Vector2(0.1,0.1) });
+		const blockMaterial2 = new THREE.MeshPhongMaterial({ map: asphalt2, normalMap: asphaltNormal, normalScale: new THREE.Vector2(0.1,0.1)});
 		const pista1 = new THREE.Mesh(block, blockMaterial2);
 		pista1.name = "pista";
 		const pista2 = new THREE.Mesh(block, blockMaterial);
 
 		///  Foo Fighters
+		// fuselaje
 		const fighter = new THREE.Group();
+		this.collideable.push(fighter);
 		fighter.name = "Fighter";
 		const fuselage = this.createZeroFuselage();
 		fuselage.scale.set(1.2,1.2,1.2);
 		fighter.add(fuselage);
+		// alas
 		const wingTexture = textureLoader.load('/wing.png');
 		const wingMaterial = new THREE.MeshPhongMaterial({ map: wingTexture , side: THREE.DoubleSide });
 		const wing1 = this.createWing();
@@ -561,6 +628,7 @@ export class SceneManager {
 		wing2.position.set(1,0,-1);
 		fighter.add(wing1);
 		wing1.position.set(-1,0,-1);
+		// alerones traseros
 		const tailWing1 = wing1.clone();
 		tailWing1.scale.set(0.3,0.3,0.3);
 		tailWing1.position.set(0,0,5);
@@ -573,6 +641,7 @@ export class SceneManager {
 		tailWing3.scale.set(0.2,0.3,0.3);
 		tailWing3.rotation.z = MathUtils.degToRad(90);
 		fighter.add(tailWing3);
+		// turbina
 		const propellers = new THREE.Group();
 		propellers.name = "propellers";
 		fighter.add(propellers);
@@ -590,6 +659,7 @@ export class SceneManager {
 		propeller3.scale.set(0.2,0.5,0.1);
 		propeller3.rotation.y= MathUtils.degToRad(-120);
 		propellers.add(propeller3);
+		// tren de aterrizaje
 		const leftGear = this.createLandingGear();
 		leftGear.name = "leftGear";
 		leftGear.position.set(-4, -0.5, 0);
@@ -601,7 +671,7 @@ export class SceneManager {
 		wing1.add(leftGear);
 		wing2.add(rightGear);
 		fighter.add(tailWheel);
-		
+		// controles
 		this.airplaneController = new AirplaneController(fighter,{
 			maxSpeed: 120,
 			accelResponse: 2.2,
@@ -642,6 +712,7 @@ export class SceneManager {
 			}
 		});
 
+		// posicionamientos finales
 		edificios.add(pista2);
 		edificios.add(torre);
 		for(let i=0; i<7; i++){
@@ -671,11 +742,61 @@ export class SceneManager {
 		const canon = this.scene.getObjectByName("canon");
 		const leftGear = this.scene.getObjectByName("leftGear");
 		const rightGear = this.scene.getObjectByName("rightGear");
-    
+		
+		// trayectoria del destructor
     	if (!barquito) return;
 		destructor.rotation.y += 0.003;
 
-		const dt = Math.min(0.05, this.clock.getDelta()); // clamp por si se pausa un tab
+		// animaciones del zero
+		const dt = Math.min(0.05, this.clock.getDelta());
+		for(let i = this.bullets.length - 1; i >= 0; i--){
+			const bullet = this.bullets[i];
+			const mesh = bullet.mesh;
+			const vel = bullet.velocity;
+			vel.y -= this.gravity*dt; // v = v0 + a*t
+			this.bullets[i].velocity = vel;
+			const displacement = vel.clone().multiplyScalar(dt); // p = p0 + v*t
+			const oldPos = bullet.oldPos.clone();
+			mesh.position.add(displacement);
+			const currentDir = vel.clone().normalize();
+			mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), currentDir);
+			this.bullets[i].oldPos = mesh.position.clone();
+
+			this.raycaster.set(oldPos,displacement.normalize());
+			this.raycaster.far = 5*displacement.length();
+			const intersects = this.raycaster.intersectObjects(this.collideable, true);
+			if( mesh.position.y < 5 ){
+				this.scene.remove(mesh);
+				this.bullets.splice(i,1);
+			} else if (intersects.length > 0){
+				console.log("impactó en %s",intersects[0]);
+				const impact = intersects[0].point;
+				const explosionGeometry = new THREE.SphereGeometry(25,32,32);
+				const explosionMaterial = new THREE.MeshPhongMaterial({
+					color: 0xffffff,
+					transparent: true,
+					opacity: 1.0,
+					side: THREE.DoubleSide
+				});
+				const explosion = new THREE.Mesh(explosionGeometry,explosionMaterial);
+				explosion.position.copy(impact);
+				this.scene.add(explosion);
+				this.explosions.push({mesh: explosion, startTime: this.clock.elapsedTime});
+				this.scene.remove(mesh);
+				this.bullets.splice(i,1);
+			}
+		}
+		for(let i = this.explosions.length - 1; i >= 0; i--){
+			const exp = this.explosions[i];
+			const elapsed = this.clock.elapsedTime - exp.startTime;
+			if(elapsed > 1){
+				this.scene.remove(exp.mesh);
+				this.explosions.splice(i,1);
+			}else{
+				exp.mesh.scale.setScalar(1 + elapsed * 2);
+				exp.mesh.material.opacity = 1 - elapsed;
+			}
+		}
   		this.airplaneController.update(dt);
 		const propellers = this.scene.getObjectByName("propellers");
 		propellers.rotation.y += 0.5* this.airplaneController.getEnginePower()*100;
@@ -687,6 +808,7 @@ export class SceneManager {
 			rightGear.rotation.z = Math.max(rightGear.rotation.z - dt * 1.5, 0);
 		}
 
+		// cámaras
 		const shipWorldPos = new THREE.Vector3();
 		barquito.getWorldPosition(shipWorldPos);
 		const fighter = this.scene.getObjectByName("Fighter");
@@ -697,10 +819,10 @@ export class SceneManager {
 		switch (this.mode) {
 			case '1':  // Orbital general centrada en la isla
 				this.controls.enable = true;
-				this.controls.target.set(0,0,0);  // Posición de pistas/isla
+				this.controls.target.set(0,0,0);
 				this.camera.position.copy(new THREE.Vector3(0, 1000, 0));
 				break;
-			case '2':  // Persecución del avión (detrás)
+			case '2':  // Tercera persona avión
 				this.controls.enable = false;
 				localOffset = new THREE.Vector3(0, 10, 25);
 				worldOffset = localOffset.clone().applyQuaternion(fighter.quaternion);
@@ -708,10 +830,10 @@ export class SceneManager {
 				this.camera.position.lerp(chaseCameraPos, 0.1);
 				this.camera.lookAt(airplaneWorldPos);
 				break;
-			case '3':  // Primera persona del avión (cockpit)
+			case '3':  // Primera persona avión
 				this.controls.enable = false;
 				fighter.getWorldPosition(airplaneWorldPos);
-				localOffset = new THREE.Vector3(0, 1.5, -3); // Posición en cockpit; ajusta valores
+				localOffset = new THREE.Vector3(0, 1.5, -3);
 				const dogfightCameraPos = localOffset.clone().applyQuaternion(fighter.quaternion).add(airplaneWorldPos);
 				this.camera.position.copy(dogfightCameraPos);
 				this.camera.quaternion.copy(fighter.quaternion);
@@ -721,7 +843,7 @@ export class SceneManager {
 				this.controls.target.copy(shipWorldPos);
 				this.camera.position.copy(shipWorldPos.clone().add(new THREE.Vector3(0, 500, 0)));
 				break;
-			case '5':  // De persecución del barco (detrás)
+			case '5':  // Tercera persona barco
 				this.controls.enable = false;
 				localOffset = new THREE.Vector3(0, 40, -120);
 				worldOffset = localOffset.clone().applyQuaternion(destructor.quaternion);
@@ -729,38 +851,23 @@ export class SceneManager {
 				this.camera.position.lerp(cameraPos, 0.1);
 				this.camera.lookAt(shipWorldPos);
 				break;
-			case '6':  // Dirección que apunta el cañón (vista desde cañón)
+			case '6':  // POV cañon
 				this.controls.enable = false;
-				// 1. Definir el offset (desplazamiento) LOCAL para la posición de la cámara
-				// El cañón está rotado por la torreta (Y) y por sí mismo (Z).
-				// Necesitamos que la cámara se desplace un poco en el eje local:
-				// X: Lateral (para ver el cañón al lado)
-				// Y: Arriba/Abajo (para ver el cañón desde arriba o abajo)
-				// Z: Adelante/Atrás (para ver desde la boca o desde atrás)
-				
-				// Ejemplo de offset: 5 unidades a la DERECHA, 2 unidades ARRIBA, 10 unidades ATRÁS (del punto pivote del cañón)
 				const localCameraOffset = new THREE.Vector3(0, 10, 0); 
 				
-				// 2. Transformar el offset local a coordenadas mundiales (para la posición de la cámara)
-				// Usamos un clon del offset.
 				const worldCameraPos = localCameraOffset.clone();
-				canon.localToWorld(worldCameraPos); // Este es el punto mundial donde estará la cámara
+				canon.localToWorld(worldCameraPos);
 				
 				this.camera.position.copy(worldCameraPos);
 				
-				// ----------------------------------------------------
-				// 3. Calcular el punto de enfoque (mismo que antes, asumiendo (0, 1, 0) es la dirección correcta)
 				const lookAheadDistance = 500; 
 				const localDirection = new THREE.Vector3(0, 1, 0); // Eje de disparo corregido
 				
 				const localTarget = localDirection.multiplyScalar(lookAheadDistance);
 				
-				// La posición inicial del cañón es (0,0,0) en su espacio local.
-				// Transformamos el punto local (0, 500, 0) a coordenadas mundiales
 				const canonWorldTarget = localTarget.clone();
 				canon.localToWorld(canonWorldTarget);
 
-				// 4. Apuntar la cámara a ese punto
 				this.camera.lookAt(canonWorldTarget);
 				break;
 			case '7':  // Orbital centrada en torre de control
