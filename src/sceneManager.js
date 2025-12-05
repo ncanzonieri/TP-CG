@@ -131,10 +131,10 @@ export class SceneManager {
 			const index = (py * width + px) * 4;
 			const heightValue = pixelData[index] / 255;
 
-			const y = heightValue * 112 - 5;
+			const y = heightValue * 112;
 			positions.setY(i, y);
 		}
-		const smoothPasses = 2;
+		const smoothPasses = 5;
 		for (let pass = 0; pass < smoothPasses; pass++) {
 			const temp = positions.array.slice();
 			for (let i = 0; i < positions.count; i++) {
@@ -164,10 +164,9 @@ export class SceneManager {
 
 		const islandMaterial = new THREE.MeshPhongMaterial({
 			normalMap: islandNormal,
-			normalScale: new THREE.Vector2(0.1,0.1),
+			normalScale: new THREE.Vector2(0.5,0.5),
 			map: islandTexture,
-			clippingPlanes: new THREE.Plane(new THREE.Vector3(0, 1, 0), -5),
-			side: THREE.DoubleSide
+			clippingPlanes: new THREE.Plane(new THREE.Vector3(0, 1, 0), -5)
 		});
 		islandMaterial.name = "islandMaterial";
 
